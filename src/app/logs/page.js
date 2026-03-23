@@ -5,31 +5,51 @@ import { supabase } from "@/lib/supabase";
 import useAuth from "@/lib/useAuth";
 
 export default function Page() {
-  const { authLoading } = useAuth();
+  const { user, authLoading } = useAuth();
   const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!authLoading) {
+    if (!authLoading && !user) {
+      window.location.href = "/login";
+      return;
+    }
+
+    if (!authLoading && user) {
       load();
     }
-  }, [authLoading]);
+  }, [authLoading, user]);
 
   async function load() {
+    if (!user) return;
+
+    setLoading(true);
+
     const { data, error } = await supabase
       .from("logs")
       .select("*")
+      .eq("user_id", user.id)
       .order("id", { ascending: false });
 
     if (error) {
       console.error("load logs error:", error);
+      alert(error.message);
+      setLoading(false);
       return;
     }
 
     setLogs(data || []);
+    setLoading(false);
   }
 
   async function deleteLog(id) {
-    const { error } = await supabase.from("logs").delete().eq("id", id);
+    if (!user) return;
+
+    const { error } = await supabase
+      .from("logs")
+      .delete()
+      .eq("id", id)
+      .eq("user_id", user.id);
 
     if (error) {
       console.error("delete log error:", error);
@@ -41,7 +61,15 @@ export default function Page() {
   }
 
   async function clearLogs() {
-    const { error } = await supabase.from("logs").delete().gt("id", 0);
+    if (!user) return;
+
+    const yes = window.confirm("Clear all your logs?");
+    if (!yes) return;
+
+    const { error } = await supabase
+      .from("logs")
+      .delete()
+      .eq("user_id", user.id);
 
     if (error) {
       console.error("clear logs error:", error);
@@ -52,14 +80,17 @@ export default function Page() {
     load();
   }
 
-  if (authLoading) {
+  if (authLoading || loading) {
     return <div>Loading...</div>;
   }
 
   return (
     <div>
-      <div className="flex justify-between mb-6">
-        <div className="text-2xl">Activity Logs</div>
+      <div className="flex justify-between mb-6 items-center gap-3">
+        <div>
+          <div className="text-2xl">Activity Logs</div>
+          <div className="text-sm text-zinc-400">{user?.email}</div>
+        </div>
 
         <button
           onClick={clearLogs}
@@ -70,6 +101,10 @@ export default function Page() {
       </div>
 
       <div className="flex flex-col gap-3">
+        {logs.length === 0 && (
+          <div className="text-zinc-400 text-sm">No logs yet.</div>
+        )}
+
         {logs.map((log) => (
           <div
             key={log.id}

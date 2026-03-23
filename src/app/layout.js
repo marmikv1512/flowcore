@@ -35,7 +35,7 @@ export default function RootLayout({ children }) {
       <body className="bg-zinc-950 text-white">
         <div className="flex h-screen">
           <aside className="w-64 bg-zinc-900 border-r border-zinc-800 p-4 flex flex-col">
-            <div className="text-xl font-semibold mb-6">Flowcore</div>
+            <div className="text-xl font-semibold mb-6">Flowcore TEST 123</div>
 
             <nav className="flex flex-col gap-1 text-sm">
               <SidebarLink href="/" icon={<LayoutDashboard size={18} />} text="Dashboard" />

@@ -16,31 +16,49 @@ export default function Page() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    if (!authLoading && !user) {
+      window.location.href = "/login";
+      return;
+    }
+
     if (!authLoading && user) {
       loadAll();
     }
   }, [authLoading, user]);
 
   async function loadAll() {
+    if (!user) return;
+
     setLoading(true);
 
     const [
       { data: workflowsData, error: workflowsError },
       { data: clientsData, error: clientsError },
     ] = await Promise.all([
-      supabase.from("workflows").select("*").order("id", { ascending: false }),
-      supabase.from("clients").select("*").order("id", { ascending: false }),
+      supabase
+        .from("workflows")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("id", { ascending: false }),
+
+      supabase
+        .from("clients")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("id", { ascending: false }),
     ]);
 
     setLoading(false);
 
     if (workflowsError) {
       console.error("load workflows error:", workflowsError);
+      alert(workflowsError.message);
       return;
     }
 
     if (clientsError) {
       console.error("load clients error:", clientsError);
+      alert(clientsError.message);
       return;
     }
 
@@ -54,7 +72,13 @@ export default function Page() {
   }
 
   async function deleteWorkflow(id) {
-    const { error } = await supabase.from("workflows").delete().eq("id", id);
+    if (!user) return;
+
+    const { error } = await supabase
+      .from("workflows")
+      .delete()
+      .eq("id", id)
+      .eq("user_id", user.id);
 
     if (error) {
       console.error("delete workflow error:", error);
@@ -66,10 +90,13 @@ export default function Page() {
   }
 
   async function duplicateWorkflow(id) {
+    if (!user) return;
+
     const { data: originalWorkflow, error: workflowError } = await supabase
       .from("workflows")
       .select("*")
       .eq("id", id)
+      .eq("user_id", user.id)
       .single();
 
     if (workflowError) {
@@ -82,6 +109,7 @@ export default function Page() {
       .from("workflow_steps")
       .select("*")
       .eq("workflow_id", id)
+      .eq("user_id", user.id)
       .order("step_order", { ascending: true });
 
     if (stepsError) {
@@ -117,6 +145,7 @@ export default function Page() {
         type: s.type,
         step_order: s.step_order,
         config: s.config || {},
+        user_id: user.id,
       }));
 
       const { error: insertStepsError } = await supabase
@@ -134,10 +163,13 @@ export default function Page() {
   }
 
   async function toggleWorkflowStatus(id, currentValue) {
+    if (!user) return;
+
     const { error } = await supabase
       .from("workflows")
       .update({ is_active: !currentValue })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("user_id", user.id);
 
     if (error) {
       console.error(error);
@@ -154,10 +186,13 @@ export default function Page() {
   }
 
   async function saveRename(id) {
+    if (!user) return;
+
     const { error } = await supabase
       .from("workflows")
       .update({ name: renameValue || "Untitled workflow" })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("user_id", user.id);
 
     if (error) {
       console.error(error);
@@ -171,10 +206,13 @@ export default function Page() {
   }
 
   async function saveAsTemplate(w) {
+    if (!user) return;
+
     const { data: stepsData, error: stepsError } = await supabase
       .from("workflow_steps")
       .select("*")
       .eq("workflow_id", w.id)
+      .eq("user_id", user.id)
       .order("step_order", { ascending: true });
 
     if (stepsError) {
@@ -208,10 +246,13 @@ export default function Page() {
   }
 
   async function runWorkflow(w) {
+    if (!user) return;
+
     const { data: stepsData, error: stepsError } = await supabase
       .from("workflow_steps")
       .select("*")
       .eq("workflow_id", w.id)
+      .eq("user_id", user.id)
       .order("step_order", { ascending: true });
 
     if (stepsError) {
@@ -226,7 +267,7 @@ export default function Page() {
       workflow_name: w.name,
       client_name: clientName,
       trigger: w.trigger || "Manual",
-      time_text: new Date().toLocaleString(),
+      time_text: new Date().toISOString(),
       steps: [],
       user_id: user.id,
     };
@@ -234,10 +275,21 @@ export default function Page() {
     (stepsData || []).forEach((s) => {
       let result = "";
 
-      if (s.type === "Task") result = `Task created: ${s.config?.taskName || "Untitled task"}`;
-      if (s.type === "Email") result = `Email sent: ${s.config?.subject || "No subject"}`;
-      if (s.type === "Notify") result = `Notification sent: ${s.config?.message || "No message"}`;
-      if (s.type === "Trigger") result = "Triggered by workflow trigger";
+      if (s.type === "Task") {
+        result = `Task created: ${s.config?.taskName || "Untitled task"}`;
+      }
+
+      if (s.type === "Email") {
+        result = `Email sent: ${s.config?.subject || "No subject"}`;
+      }
+
+      if (s.type === "Notify") {
+        result = `Notification sent: ${s.config?.message || "No message"}`;
+      }
+
+      if (s.type === "Trigger") {
+        result = "Triggered by workflow trigger";
+      }
 
       mainLog.steps.push({
         type: s.type,
@@ -253,10 +305,17 @@ export default function Page() {
       return;
     }
 
-    await supabase
+    const { error: updateError } = await supabase
       .from("workflows")
       .update({ run_count: (w.run_count || 0) + 1 })
-      .eq("id", w.id);
+      .eq("id", w.id)
+      .eq("user_id", user.id);
+
+    if (updateError) {
+      console.error(updateError);
+      alert(updateError.message);
+      return;
+    }
 
     loadAll();
     alert("Workflow executed");
@@ -299,6 +358,10 @@ export default function Page() {
       )}
 
       <div className="flex flex-col gap-3">
+        {filtered.length === 0 && !loading && (
+          <div className="text-sm text-zinc-400">No workflows yet.</div>
+        )}
+
         {filtered.map((w) => (
           <div
             key={w.id}
