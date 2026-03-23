@@ -2,6 +2,19 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import {
+  Search,
+  Plus,
+  Play,
+  Pencil,
+  Copy,
+  Trash2,
+  Power,
+  FolderKanban,
+  Sparkles,
+  ChevronRight,
+  Files,
+} from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import useAuth from "@/lib/useAuth";
 
@@ -14,6 +27,7 @@ export default function Page() {
   const [renameId, setRenameId] = useState(null);
   const [renameValue, setRenameValue] = useState("");
   const [loading, setLoading] = useState(false);
+  const [runningId, setRunningId] = useState(null);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -73,6 +87,9 @@ export default function Page() {
 
   async function deleteWorkflow(id) {
     if (!user) return;
+
+    const yes = window.confirm("Delete this workflow?");
+    if (!yes) return;
 
     const { error } = await supabase
       .from("workflows")
@@ -182,7 +199,7 @@ export default function Page() {
 
   function startRename(w) {
     setRenameId(w.id);
-    setRenameValue(w.name);
+    setRenameValue(w.name || "");
   }
 
   async function saveRename(id) {
@@ -248,6 +265,8 @@ export default function Page() {
   async function runWorkflow(w) {
     if (!user) return;
 
+    setRunningId(w.id);
+
     const { data: stepsData, error: stepsError } = await supabase
       .from("workflow_steps")
       .select("*")
@@ -256,6 +275,7 @@ export default function Page() {
       .order("step_order", { ascending: true });
 
     if (stepsError) {
+      setRunningId(null);
       console.error(stepsError);
       alert(stepsError.message);
       return;
@@ -300,6 +320,7 @@ export default function Page() {
     const { error: logError } = await supabase.from("logs").insert([mainLog]);
 
     if (logError) {
+      setRunningId(null);
       console.error(logError);
       alert(logError.message);
       return;
@@ -310,6 +331,8 @@ export default function Page() {
       .update({ run_count: (w.run_count || 0) + 1 })
       .eq("id", w.id)
       .eq("user_id", user.id);
+
+    setRunningId(null);
 
     if (updateError) {
       console.error(updateError);
@@ -322,149 +345,280 @@ export default function Page() {
   }
 
   const filtered = useMemo(() => {
-    return workflows.filter((w) =>
-      (w.name || "").toLowerCase().includes(search.toLowerCase())
-    );
-  }, [workflows, search]);
+    return workflows.filter((w) => {
+      const clientName = getClientName(w.client_id).toLowerCase();
+      const workflowName = (w.name || "").toLowerCase();
+      const trigger = (w.trigger || "").toLowerCase();
+      const q = search.toLowerCase();
+
+      return (
+        workflowName.includes(q) ||
+        clientName.includes(q) ||
+        trigger.includes(q)
+      );
+    });
+  }, [workflows, clients, search]);
+
+  const stats = useMemo(() => {
+    const total = workflows.length;
+    const active = workflows.filter((w) => w.is_active ?? true).length;
+    const totalRuns = workflows.reduce((sum, w) => sum + (w.run_count || 0), 0);
+
+    return { total, active, totalRuns };
+  }, [workflows]);
 
   if (authLoading) {
-    return <div>Loading...</div>;
+    return <div className="text-zinc-400">Loading...</div>;
   }
 
   return (
-    <div>
-      <div className="flex justify-between mb-6 gap-3">
-        <div className="text-2xl font-semibold">Workflows</div>
+    <div className="space-y-6 md:space-y-8">
+      <section className="relative overflow-hidden rounded-[28px] border border-white/5 bg-gradient-to-br from-white/[0.08] via-white/[0.03] to-transparent p-6 md:p-8">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.12),transparent_28%)] pointer-events-none" />
 
-        <div className="flex gap-2">
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search workflows"
-            className="bg-zinc-900 border border-zinc-800 px-3 py-2 rounded"
-          />
+        <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-2xl">
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-zinc-300 mb-4">
+              <Sparkles size={14} />
+              Workflow control
+            </div>
 
-          <Link
-            href="/workflows/builder"
-            className="bg-zinc-800 px-4 py-2 rounded"
-          >
-            + Create
-          </Link>
+            <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">
+              Build, run, copy, and manage your agency workflows.
+            </h1>
+
+            <p className="mt-3 text-sm md:text-base text-zinc-400 max-w-xl">
+              This is the core of Flowcore. If this page feels premium, the
+              product feels premium.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3 min-w-[280px]">
+            <MiniStat label="Total" value={stats.total} />
+            <MiniStat label="Active" value={stats.active} />
+            <MiniStat label="Runs" value={stats.totalRuns} />
+          </div>
         </div>
-      </div>
+      </section>
+
+      <section className="rounded-[28px] border border-white/5 bg-white/[0.03] p-4 md:p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="relative w-full lg:max-w-md">
+            <Search
+              size={17}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+            />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search workflow, client, or trigger"
+              className="w-full rounded-2xl border border-white/5 bg-black/20 pl-10 pr-4 py-3 text-sm outline-none placeholder:text-zinc-500 focus:border-white/10"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="rounded-2xl border border-white/5 bg-black/20 px-4 py-3 text-sm text-zinc-400">
+              {filtered.length} shown
+            </div>
+
+            <Link
+              href="/workflows/builder"
+              className="inline-flex items-center gap-2 rounded-2xl bg-white text-black px-4 py-3 text-sm font-medium hover:opacity-90 transition"
+            >
+              <Plus size={16} />
+              Create workflow
+            </Link>
+          </div>
+        </div>
+      </section>
 
       {loading && (
-        <div className="text-sm text-zinc-400 mb-4">Loading workflows...</div>
+        <div className="rounded-2xl border border-white/5 bg-white/[0.03] px-4 py-4 text-sm text-zinc-400">
+          Loading workflows...
+        </div>
       )}
 
-      <div className="flex flex-col gap-3">
-        {filtered.length === 0 && !loading && (
-          <div className="text-sm text-zinc-400">No workflows yet.</div>
-        )}
-
-        {filtered.map((w) => (
-          <div
-            key={w.id}
-            className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl"
+      {!loading && filtered.length === 0 && (
+        <div className="rounded-[28px] border border-dashed border-white/10 bg-white/[0.02] px-6 py-14 text-center">
+          <div className="mx-auto mb-4 h-14 w-14 rounded-2xl border border-white/5 bg-black/30 flex items-center justify-center text-zinc-400">
+            <FolderKanban size={24} />
+          </div>
+          <div className="text-lg font-medium">No workflows yet</div>
+          <div className="mt-2 text-sm text-zinc-500">
+            Create your first workflow and start automating client ops.
+          </div>
+          <Link
+            href="/workflows/builder"
+            className="inline-flex items-center gap-2 rounded-2xl bg-white text-black px-4 py-3 text-sm font-medium hover:opacity-90 transition mt-6"
           >
-            <div className="flex justify-between items-start gap-4">
-              <div className="flex-1">
-                {renameId === w.id ? (
-                  <div className="flex gap-2 mb-2">
-                    <input
-                      value={renameValue}
-                      onChange={(e) => setRenameValue(e.target.value)}
-                      className="bg-zinc-950 border px-3 py-2 rounded"
-                    />
+            <Plus size={16} />
+            Create workflow
+          </Link>
+        </div>
+      )}
 
-                    <button
-                      onClick={() => saveRename(w.id)}
-                      className="bg-blue-600 px-3 py-2 rounded text-sm"
-                    >
-                      Save
-                    </button>
+      <div className="grid gap-4 xl:grid-cols-2">
+        {filtered.map((w) => {
+          const active = w.is_active ?? true;
+
+          return (
+            <div
+              key={w.id}
+              className="rounded-[28px] border border-white/5 bg-white/[0.03] p-5 md:p-6"
+            >
+              <div className="flex items-start justify-between gap-4 mb-5">
+                <div className="min-w-0 flex-1">
+                  {renameId === w.id ? (
+                    <div className="flex flex-col sm:flex-row gap-2 mb-2">
+                      <input
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        className="flex-1 rounded-2xl border border-white/5 bg-black/20 px-4 py-3 text-sm outline-none"
+                        placeholder="Workflow name"
+                      />
+
+                      <button
+                        onClick={() => saveRename(w.id)}
+                        className="rounded-2xl bg-white text-black px-4 py-3 text-sm font-medium"
+                      >
+                        Save
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <div className="text-xl font-semibold tracking-tight">
+                        {w.name || "Untitled workflow"}
+                      </div>
+
+                      <span
+                        className={`rounded-full border px-2.5 py-1 text-[11px] ${
+                          active
+                            ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-300"
+                            : "border-white/10 bg-white/[0.05] text-zinc-400"
+                        }`}
+                      >
+                        {active ? "Active" : "Inactive"}
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <MetaChip label={getClientName(w.client_id)} />
+                    <MetaChip label={`Trigger: ${w.trigger || "Manual"}`} tone="blue" />
+                    <MetaChip label={`${w.run_count || 0} runs`} tone="purple" />
                   </div>
-                ) : (
-                  <div className="text-lg">{w.name}</div>
-                )}
-
-                <div className="text-xs text-zinc-400">
-                  {getClientName(w.client_id)}
                 </div>
-
-                <div className="text-xs text-blue-400">
-                  Trigger: {w.trigger || "Manual"}
-                </div>
-
-                <div className="text-xs text-zinc-500">
-                  Runs: {w.run_count || 0}
-                </div>
-
-                <div className="mt-1">
-                  <span
-                    className={`text-xs px-2 py-1 rounded ${
-                      (w.is_active ?? true) ? "bg-green-700" : "bg-zinc-700"
-                    }`}
-                  >
-                    {(w.is_active ?? true) ? "Active" : "Inactive"}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-2 text-sm max-w-md justify-end">
-                <button
-                  onClick={() => runWorkflow(w)}
-                  className="bg-green-600 px-2 py-1 rounded"
-                >
-                  Run
-                </button>
 
                 <Link
                   href={`/workflows/builder?id=${w.id}`}
-                  className="bg-blue-600 px-2 py-1 rounded"
+                  className="hidden sm:inline-flex items-center gap-1 text-sm text-zinc-300 hover:text-white"
                 >
-                  Edit
+                  Open
+                  <ChevronRight size={15} />
                 </Link>
+              </div>
 
-                <button
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <ActionButton
+                  onClick={() => runWorkflow(w)}
+                  icon={<Play size={15} />}
+                  label={runningId === w.id ? "Running..." : "Run"}
+                  className="bg-emerald-500/15 text-emerald-300 border-emerald-500/20 hover:bg-emerald-500/20"
+                />
+
+                <LinkButton
+                  href={`/workflows/builder?id=${w.id}`}
+                  icon={<Pencil size={15} />}
+                  label="Edit"
+                  className="bg-blue-500/15 text-blue-300 border-blue-500/20 hover:bg-blue-500/20"
+                />
+
+                <ActionButton
                   onClick={() => startRename(w)}
-                  className="bg-zinc-800 px-2 py-1 rounded"
-                >
-                  Rename
-                </button>
+                  icon={<Pencil size={15} />}
+                  label="Rename"
+                />
 
-                <button
-                  onClick={() => toggleWorkflowStatus(w.id, w.is_active ?? true)}
-                  className="bg-zinc-800 px-2 py-1 rounded"
-                >
-                  {(w.is_active ?? true) ? "Disable" : "Enable"}
-                </button>
+                <ActionButton
+                  onClick={() => toggleWorkflowStatus(w.id, active)}
+                  icon={<Power size={15} />}
+                  label={active ? "Disable" : "Enable"}
+                />
 
-                <button
+                <ActionButton
                   onClick={() => saveAsTemplate(w)}
-                  className="bg-zinc-800 px-2 py-1 rounded"
-                >
-                  Template
-                </button>
+                  icon={<Files size={15} />}
+                  label="Template"
+                />
 
-                <button
+                <ActionButton
                   onClick={() => duplicateWorkflow(w.id)}
-                  className="bg-zinc-800 px-2 py-1 rounded"
-                >
-                  Copy
-                </button>
+                  icon={<Copy size={15} />}
+                  label="Copy"
+                />
 
-                <button
-                  onClick={() => deleteWorkflow(w.id)}
-                  className="bg-red-600 px-2 py-1 rounded"
-                >
-                  Delete
-                </button>
+                <div className="col-span-2 sm:col-span-3">
+                  <ActionButton
+                    onClick={() => deleteWorkflow(w.id)}
+                    icon={<Trash2 size={15} />}
+                    label="Delete workflow"
+                    className="w-full bg-red-500/12 text-red-300 border-red-500/20 hover:bg-red-500/18"
+                  />
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
+  );
+}
+
+function MiniStat({ label, value }) {
+  return (
+    <div className="rounded-2xl border border-white/5 bg-black/20 px-4 py-3">
+      <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-500 mb-1">
+        {label}
+      </div>
+      <div className="text-lg font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function MetaChip({ label, tone = "neutral" }) {
+  const tones = {
+    neutral: "border-white/5 bg-black/20 text-zinc-300",
+    blue: "border-blue-500/20 bg-blue-500/10 text-blue-300",
+    purple: "border-violet-500/20 bg-violet-500/10 text-violet-300",
+  };
+
+  return (
+    <span className={`rounded-full border px-2.5 py-1 text-[11px] ${tones[tone]}`}>
+      {label}
+    </span>
+  );
+}
+
+function ActionButton({ onClick, icon, label, className = "" }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`inline-flex items-center justify-center gap-2 rounded-2xl border border-white/5 bg-black/20 px-4 py-3 text-sm text-zinc-300 transition hover:bg-white/[0.05] ${className}`}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function LinkButton({ href, icon, label, className = "" }) {
+  return (
+    <Link
+      href={href}
+      className={`inline-flex items-center justify-center gap-2 rounded-2xl border border-white/5 bg-black/20 px-4 py-3 text-sm text-zinc-300 transition hover:bg-white/[0.05] ${className}`}
+    >
+      {icon}
+      {label}
+    </Link>
   );
 }
