@@ -10,19 +10,30 @@ export default function Page() {
   async function signIn() {
     setMessage("Sending magic link...");
 
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: "http://localhost:3000",
-      },
-    });
+    try {
+      const redirectUrl =
+        typeof window !== "undefined"
+          ? window.location.origin
+          : "http://localhost:3000";
 
-    if (error) {
-      setMessage(error.message);
-      return;
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: redirectUrl,
+        },
+      });
+
+      if (error) {
+        setMessage(error.message);
+        console.error(error);
+        return;
+      }
+
+      setMessage("Check your email for login link.");
+    } catch (err) {
+      console.error("signIn failed:", err);
+      setMessage("Failed to fetch");
     }
-
-    setMessage("Check your email for login link.");
   }
 
   return (
