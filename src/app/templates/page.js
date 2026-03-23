@@ -12,71 +12,171 @@ import {
   Bell,
   Mail,
   Layers3,
+  Trash2,
 } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import useAuth from "@/lib/useAuth";
+
+const defaultTemplates = [
+  {
+    id: "default-1",
+    is_default: true,
+    name: "Client onboarding",
+    trigger: "Client Added",
+    steps: [
+      {
+        id: "default-1-step-1",
+        type: "Task",
+        config: { taskName: "Create onboarding checklist" },
+      },
+      {
+        id: "default-1-step-2",
+        type: "Email",
+        config: { subject: "Welcome client" },
+      },
+    ],
+  },
+  {
+    id: "default-2",
+    is_default: true,
+    name: "Content approval",
+    trigger: "Manual",
+    steps: [
+      {
+        id: "default-2-step-1",
+        type: "Task",
+        config: { taskName: "Review content" },
+      },
+      {
+        id: "default-2-step-2",
+        type: "Notify",
+        config: { message: "Approval needed" },
+      },
+    ],
+  },
+];
 
 export default function Page() {
   const router = useRouter();
+  const { user, authLoading } = useAuth();
+
   const [templates, setTemplates] = useState([]);
   const [search, setSearch] = useState("");
+  const [pageLoading, setPageLoading] = useState(true);
+  const [creatingId, setCreatingId] = useState(null);
 
   useEffect(() => {
-    const custom = JSON.parse(localStorage.getItem("templates")) || [];
+    if (!authLoading && !user) {
+      window.location.href = "/login";
+      return;
+    }
 
-    const defaults = [
-      {
-        id: 1,
-        name: "Client onboarding",
-        trigger: "Client Added",
-        steps: [
-          {
-            id: 11,
-            type: "Task",
-            config: { taskName: "Create onboarding checklist" },
-          },
-          {
-            id: 12,
-            type: "Email",
-            config: { subject: "Welcome client" },
-          },
-        ],
-      },
-      {
-        id: 2,
-        name: "Content approval",
-        trigger: "Manual",
-        steps: [
-          {
-            id: 21,
-            type: "Task",
-            config: { taskName: "Review content" },
-          },
-          {
-            id: 22,
-            type: "Notify",
-            config: { message: "Approval needed" },
-          },
-        ],
-      },
-    ];
+    if (!authLoading && user) {
+      loadTemplates();
+    }
+  }, [authLoading, user]);
 
-    setTemplates([...defaults, ...custom]);
-  }, []);
+  async function loadTemplates() {
+    if (!user) return;
 
-  function useTemplate(t) {
-    const old = JSON.parse(localStorage.getItem("workflows")) || [];
+    setPageLoading(true);
 
-    const workflow = {
-      id: Date.now(),
-      name: t.name,
-      steps: t.steps || [],
-      clientId: "",
-      trigger: t.trigger || "Manual",
-      isActive: true,
-      runCount: 0,
-    };
+    const { data, error } = await supabase
+      .from("templates")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("id", { ascending: false });
 
-    localStorage.setItem("workflows", JSON.stringify([...old, workflow]));
-    router.push("/workflows");
+    if (error) {
+      console.error("load templates error:", error);
+      alert(error.message);
+      setPageLoading(false);
+      return;
+    }
+
+    const customTemplates = (data || []).map((t) => ({
+      ...t,
+      is_default: false,
+      steps: Array.isArray(t.steps) ? t.steps : [],
+    }));
+
+    setTemplates([...defaultTemplates, ...customTemplates]);
+    setPageLoading(false);
+  }
+
+  async function useTemplate(t) {
+    if (!user) return;
+
+    setCreatingId(t.id);
+
+    const { data: newWorkflow, error: workflowError } = await supabase
+      .from("workflows")
+      .insert([
+        {
+          name: t.name || "Untitled workflow",
+          client_id: null,
+          trigger: t.trigger || "Manual",
+          is_active: true,
+          run_count: 0,
+          user_id: user.id,
+        },
+      ])
+      .select()
+      .single();
+
+    if (workflowError) {
+      console.error("create workflow from template error:", workflowError);
+      alert(workflowError.message);
+      setCreatingId(null);
+      return;
+    }
+
+    const steps = Array.isArray(t.steps) ? t.steps : [];
+
+    if (steps.length > 0) {
+      const stepRows = steps.map((step, index) => ({
+        workflow_id: newWorkflow.id,
+        type: step.type,
+        step_order: index,
+        config: step.config || {},
+        user_id: user.id,
+      }));
+
+      const { error: stepsError } = await supabase
+        .from("workflow_steps")
+        .insert(stepRows);
+
+      if (stepsError) {
+        console.error("create workflow steps from template error:", stepsError);
+        alert(stepsError.message);
+        setCreatingId(null);
+        return;
+      }
+    }
+
+    setCreatingId(null);
+    router.push(`/workflows/builder?id=${newWorkflow.id}`);
+  }
+
+  async function deleteTemplate(id) {
+    if (!user) return;
+
+    const yes = window.confirm("Delete this template?");
+    if (!yes) return;
+
+    const { error } = await supabase
+      .from("templates")
+      .delete()
+      .eq("id", id)
+      .eq("user_id", user.id);
+
+    if (error) {
+      console.error("delete template error:", error);
+      alert(error.message);
+      return;
+    }
+
+    loadTemplates();
   }
 
   const filteredTemplates = useMemo(() => {
@@ -88,6 +188,14 @@ export default function Page() {
       return name.includes(q) || trigger.includes(q);
     });
   }, [templates, search]);
+
+  if (authLoading || pageLoading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center text-zinc-400">
+        Loading templates...
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 md:space-y-8">
@@ -106,14 +214,13 @@ export default function Page() {
             </h1>
 
             <p className="mt-3 text-sm md:text-base text-zinc-400 max-w-xl">
-              Pick a base template, clone it into your workflow list, and adapt it
-              for your agency.
+              Use a ready-made flow as the starting point, then finish it in the builder.
             </p>
           </div>
 
           <div className="grid grid-cols-2 gap-3 min-w-[220px]">
             <MiniStat label="Templates" value={templates.length} />
-            <MiniStat label="Ready" value="Instant use" />
+            <MiniStat label="Source" value="Supabase" />
           </div>
         </div>
       </section>
@@ -146,7 +253,7 @@ export default function Page() {
           </div>
           <div className="text-lg font-medium">No templates found</div>
           <div className="mt-2 text-sm text-zinc-500">
-            Try a different search or add custom templates later.
+            Try a different search or create templates from your workflows.
           </div>
         </div>
       ) : (
@@ -166,8 +273,12 @@ export default function Page() {
                     {t.name}
                   </div>
 
-                  <div className="mt-3">
+                  <div className="mt-3 flex flex-wrap gap-2">
                     <Badge label={`Trigger: ${t.trigger || "Manual"}`} tone="blue" />
+                    <Badge
+                      label={t.is_default ? "Default" : "Custom"}
+                      tone={t.is_default ? "neutral" : "purple"}
+                    />
                   </div>
                 </div>
 
@@ -204,13 +315,25 @@ export default function Page() {
                 )}
               </div>
 
-              <button
-                onClick={() => useTemplate(t)}
-                className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-white text-black px-4 py-3 text-sm font-medium hover:opacity-90 transition"
-              >
-                <Copy size={15} />
-                Use template
-              </button>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => useTemplate(t)}
+                  disabled={creatingId === t.id}
+                  className="flex-1 inline-flex items-center justify-center gap-2 rounded-2xl bg-white text-black px-4 py-3 text-sm font-medium hover:opacity-90 transition disabled:opacity-60"
+                >
+                  <Copy size={15} />
+                  {creatingId === t.id ? "Creating..." : "Use template"}
+                </button>
+
+                {!t.is_default && (
+                  <button
+                    onClick={() => deleteTemplate(t.id)}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300 hover:bg-red-500/15 transition"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -234,6 +357,7 @@ function Badge({ label, tone = "neutral" }) {
   const tones = {
     neutral: "border-white/10 bg-white/[0.05] text-zinc-300",
     blue: "border-blue-500/20 bg-blue-500/10 text-blue-300",
+    purple: "border-violet-500/20 bg-violet-500/10 text-violet-300",
   };
 
   return (
