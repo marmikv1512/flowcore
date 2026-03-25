@@ -277,7 +277,7 @@ export default function Page() {
         trigger,
         is_active: isActive,
         schedule_type: trigger === "Time Schedule" ? scheduleType : null,
-        schedule_time: trigger === "Time Schedule" ? scheduleTime : null,
+        schedule_time: trigger === "Time Schedule" ? scheduleTime : "asia/kolkata",
         schedule_days:
           trigger === "Time Schedule"
             ? scheduleType === "weekly"
