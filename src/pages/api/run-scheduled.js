@@ -11,8 +11,8 @@ export default async function handler(req, res) {
 
   try {
     const now = new Date();
-    const currentTime = now.toTimeString().slice(0, 5);
-    const currentDay = now
+    const serverTime = now.toTimeString().slice(0, 5);
+    const serverDay = now
       .toLocaleDateString("en-US", { weekday: "long" })
       .toLowerCase();
 
@@ -23,7 +23,6 @@ export default async function handler(req, res) {
       .eq("is_active", true);
 
     if (error) {
-      console.error("fetch workflows error:", error);
       return res.status(500).json({
         success: false,
         error: error.message,
@@ -34,47 +33,48 @@ export default async function handler(req, res) {
     const debug = [];
 
     for (const w of workflows || []) {
-      const item = {
+      const row = {
         workflowId: w.id,
         workflowName: w.name,
         trigger: w.trigger,
-        is_active: w.is_active,
-        schedule_type: w.schedule_type,
-        schedule_time: w.schedule_time,
-        schedule_days: w.schedule_days,
-        last_run_at: w.last_run_at,
-        matched: false,
-        skippedBecause: null,
+        isActive: w.is_active,
+        scheduleType: w.schedule_type,
+        scheduleTime: w.schedule_time,
+        scheduleDays: w.schedule_days,
+        lastRunAt: w.last_run_at,
+        stepCount: 0,
+        status: "skipped",
+        reason: "",
       };
 
       try {
         if (!w.schedule_time) {
-          item.skippedBecause = "Missing schedule_time";
-          debug.push(item);
+          row.reason = "Missing schedule_time";
+          debug.push(row);
           continue;
         }
 
-        if (w.schedule_time !== currentTime) {
-          item.skippedBecause = `Time mismatch. workflow=${w.schedule_time}, server=${currentTime}`;
-          debug.push(item);
+        if (w.schedule_time !== serverTime) {
+          row.reason = `Time mismatch: workflow=${w.schedule_time}, server=${serverTime}`;
+          debug.push(row);
           continue;
         }
 
         if (w.schedule_type === "weekly") {
-          if (!Array.isArray(w.schedule_days) || !w.schedule_days.includes(currentDay)) {
-            item.skippedBecause = `Day mismatch. today=${currentDay}`;
-            debug.push(item);
+          if (!Array.isArray(w.schedule_days) || !w.schedule_days.includes(serverDay)) {
+            row.reason = `Day mismatch: today=${serverDay}`;
+            debug.push(row);
             continue;
           }
         }
 
         if (w.last_run_at) {
           const lastRun = new Date(w.last_run_at);
-          const diff = now.getTime() - lastRun.getTime();
+          const diffMs = now.getTime() - lastRun.getTime();
 
-          if (diff < 60000) {
-            item.skippedBecause = "Already ran within last 60 seconds";
-            debug.push(item);
+          if (diffMs < 60000) {
+            row.reason = "Already ran in last 60 seconds";
+            debug.push(row);
             continue;
           }
         }
@@ -87,14 +87,16 @@ export default async function handler(req, res) {
           .order("step_order", { ascending: true });
 
         if (stepsError) {
-          item.skippedBecause = `Steps fetch error: ${stepsError.message}`;
-          debug.push(item);
+          row.reason = `Steps fetch error: ${stepsError.message}`;
+          debug.push(row);
           continue;
         }
 
+        row.stepCount = steps?.length || 0;
+
         if (!steps || steps.length === 0) {
-          item.skippedBecause = "No steps found";
-          debug.push(item);
+          row.reason = "No steps found";
+          debug.push(row);
           continue;
         }
 
@@ -114,27 +116,27 @@ export default async function handler(req, res) {
           .eq("id", w.id)
           .eq("user_id", w.user_id);
 
-        item.matched = true;
-        item.skippedBecause = null;
-        debug.push(item);
+        row.status = "ran";
+        row.reason = "Workflow executed";
+        debug.push(row);
         ranCount += 1;
       } catch (err) {
-        item.skippedBecause = `Execution error: ${err.message}`;
-        debug.push(item);
+        row.status = "error";
+        row.reason = err.message || "Unknown execution error";
+        debug.push(row);
       }
     }
 
     return res.status(200).json({
       success: true,
       ranCount,
-      serverTime: currentTime,
-      serverDay: currentDay,
+      serverTime,
+      serverDay,
       checkedAt: now.toISOString(),
       totalScheduledWorkflows: workflows?.length || 0,
       debug,
     });
   } catch (err) {
-    console.error("run-scheduled fatal error:", err);
     return res.status(500).json({
       success: false,
       error: err.message || "Unknown error",
