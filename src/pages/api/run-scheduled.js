@@ -1,5 +1,5 @@
-import { supabase } from "@/lib/supabase";
-import { executeWorkflow } from "@/lib/executeWorkflow";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { runWorkflowEngine } from "@/lib/runWorkflow";
 
 export default async function handler(req, res) {
   if (req.method !== "GET") {
@@ -16,7 +16,7 @@ export default async function handler(req, res) {
       .toLocaleDateString("en-US", { weekday: "long" })
       .toLowerCase();
 
-    const { data: workflows, error } = await supabase
+    const { data: workflows, error } = await supabaseAdmin
       .from("workflows")
       .select("*")
       .eq("trigger", "Time Schedule")
@@ -79,7 +79,7 @@ export default async function handler(req, res) {
           }
         }
 
-        const { data: steps, error: stepsError } = await supabase
+        const { data: steps, error: stepsError } = await supabaseAdmin
           .from("workflow_steps")
           .select("*")
           .eq("workflow_id", w.id)
@@ -100,21 +100,43 @@ export default async function handler(req, res) {
           continue;
         }
 
-        await executeWorkflow({
-          workflow: w,
-          steps,
-          user: { id: w.user_id },
-          clientName: "Scheduled",
-          trigger: "Time Schedule",
-        });
+        const results = await runWorkflowEngine(w, steps, { id: w.user_id });
 
-        await supabase
+        const { error: logError } = await supabaseAdmin.from("logs").insert([
+          {
+            workflow_name: w.name,
+            client_name: "Scheduled",
+            trigger: "Time Schedule",
+            time_text: new Date().toISOString(),
+            steps: results,
+            user_id: w.user_id,
+          },
+        ]);
+
+        if (logError) {
+          row.status = "error";
+          row.reason = `Log insert error: ${logError.message}`;
+          debug.push(row);
+          continue;
+        }
+
+        const newRunCount = (w.run_count || 0) + 1;
+
+        const { error: updateError } = await supabaseAdmin
           .from("workflows")
           .update({
+            run_count: newRunCount,
             last_run_at: new Date().toISOString(),
           })
           .eq("id", w.id)
           .eq("user_id", w.user_id);
+
+        if (updateError) {
+          row.status = "error";
+          row.reason = `Workflow update error: ${updateError.message}`;
+          debug.push(row);
+          continue;
+        }
 
         row.status = "ran";
         row.reason = "Workflow executed";
