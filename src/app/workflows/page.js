@@ -1,6 +1,9 @@
 "use client";
 
+import { toast } from "sonner";
+import { useConfirm } from "@/components/ConfirmModal";
 import { useEffect, useMemo, useState } from "react";
+import { executeWorkflow } from "@/lib/executeWorkflow";
 import Link from "next/link";
 import {
   Search,
@@ -20,6 +23,7 @@ import useAuth from "@/lib/useAuth";
 
 export default function Page() {
   const { user, authLoading } = useAuth();
+  const confirm = useConfirm();
 
   const [workflows, setWorkflows] = useState([]);
   const [clients, setClients] = useState([]);
@@ -65,14 +69,12 @@ export default function Page() {
     setLoading(false);
 
     if (workflowsError) {
-      console.error("load workflows error:", workflowsError);
-      alert(workflowsError.message);
+      toast.error(workflowsError.message || "Failed to load workflows");
       return;
     }
 
     if (clientsError) {
-      console.error("load clients error:", clientsError);
-      alert(clientsError.message);
+      toast.error(clientsError.message || "Failed to load clients");
       return;
     }
 
@@ -88,8 +90,16 @@ export default function Page() {
   async function deleteWorkflow(id) {
     if (!user) return;
 
-    const yes = window.confirm("Delete this workflow?");
-    if (!yes) return;
+    const ok = await confirm({
+      title: "Delete workflow",
+      description: "Are you sure you want to delete this workflow?",
+    });
+
+    if (!ok) return;
+
+    const previousWorkflows = workflows;
+
+    setWorkflows((prev) => prev.filter((w) => w.id !== id));
 
     const { error } = await supabase
       .from("workflows")
@@ -98,89 +108,90 @@ export default function Page() {
       .eq("user_id", user.id);
 
     if (error) {
-      console.error("delete workflow error:", error);
-      alert(error.message);
+      setWorkflows(previousWorkflows);
+      toast.error(error.message || "Failed to delete workflow");
       return;
     }
 
-    loadAll();
+    toast.success("Workflow deleted");
   }
 
   async function duplicateWorkflow(id) {
     if (!user) return;
 
-    const { data: originalWorkflow, error: workflowError } = await supabase
-      .from("workflows")
-      .select("*")
-      .eq("id", id)
-      .eq("user_id", user.id)
-      .single();
+    await toast.promise(
+      (async () => {
+        const { data: originalWorkflow, error: workflowError } = await supabase
+          .from("workflows")
+          .select("*")
+          .eq("id", id)
+          .eq("user_id", user.id)
+          .single();
 
-    if (workflowError) {
-      console.error(workflowError);
-      alert(workflowError.message);
-      return;
-    }
+        if (workflowError) throw workflowError;
 
-    const { data: originalSteps, error: stepsError } = await supabase
-      .from("workflow_steps")
-      .select("*")
-      .eq("workflow_id", id)
-      .eq("user_id", user.id)
-      .order("step_order", { ascending: true });
+        const { data: originalSteps, error: stepsError } = await supabase
+          .from("workflow_steps")
+          .select("*")
+          .eq("workflow_id", id)
+          .eq("user_id", user.id)
+          .order("step_order", { ascending: true });
 
-    if (stepsError) {
-      console.error(stepsError);
-      alert(stepsError.message);
-      return;
-    }
+        if (stepsError) throw stepsError;
 
-    const { data: newWorkflow, error: insertWorkflowError } = await supabase
-      .from("workflows")
-      .insert([
-        {
-          name: `${originalWorkflow.name} copy`,
-          client_id: originalWorkflow.client_id,
-          trigger: originalWorkflow.trigger,
-          is_active: originalWorkflow.is_active,
-          run_count: 0,
-          user_id: user.id,
-        },
-      ])
-      .select()
-      .single();
+        const { data: newWorkflow, error: insertWorkflowError } = await supabase
+          .from("workflows")
+          .insert([
+            {
+              name: `${originalWorkflow.name} copy`,
+              client_id: originalWorkflow.client_id,
+              trigger: originalWorkflow.trigger,
+              is_active: originalWorkflow.is_active,
+              run_count: 0,
+              user_id: user.id,
+            },
+          ])
+          .select()
+          .single();
 
-    if (insertWorkflowError) {
-      console.error(insertWorkflowError);
-      alert(insertWorkflowError.message);
-      return;
-    }
+        if (insertWorkflowError) throw insertWorkflowError;
 
-    if (originalSteps?.length) {
-      const copiedSteps = originalSteps.map((s) => ({
-        workflow_id: newWorkflow.id,
-        type: s.type,
-        step_order: s.step_order,
-        config: s.config || {},
-        user_id: user.id,
-      }));
+        if (originalSteps?.length) {
+          const copiedSteps = originalSteps.map((s) => ({
+            workflow_id: newWorkflow.id,
+            type: s.type,
+            step_order: s.step_order,
+            config: s.config || {},
+            user_id: user.id,
+          }));
 
-      const { error: insertStepsError } = await supabase
-        .from("workflow_steps")
-        .insert(copiedSteps);
+          const { error: insertStepsError } = await supabase
+            .from("workflow_steps")
+            .insert(copiedSteps);
 
-      if (insertStepsError) {
-        console.error(insertStepsError);
-        alert(insertStepsError.message);
-        return;
+          if (insertStepsError) throw insertStepsError;
+        }
+
+        setWorkflows((prev) => [newWorkflow, ...prev]);
+      })(),
+      {
+        loading: "Duplicating workflow...",
+        success: "Workflow duplicated",
+        error: (err) => err.message || "Failed to duplicate workflow",
       }
-    }
-
-    loadAll();
+    );
   }
 
   async function toggleWorkflowStatus(id, currentValue) {
     if (!user) return;
+
+    const previousWorkflows = workflows;
+
+    setWorkflows((prev) =>
+      prev.map((w) =>
+        w.id === id ? { ...w, is_active: !currentValue } : w
+      )
+    );
 
     const { error } = await supabase
       .from("workflows")
@@ -189,12 +200,12 @@ export default function Page() {
       .eq("user_id", user.id);
 
     if (error) {
-      console.error(error);
-      alert(error.message);
+      setWorkflows(previousWorkflows);
+      toast.error(error.message || "Failed to update workflow status");
       return;
     }
 
-    loadAll();
+    toast.success(!currentValue ? "Workflow enabled" : "Workflow disabled");
   }
 
   function startRename(w) {
@@ -205,21 +216,31 @@ export default function Page() {
   async function saveRename(id) {
     if (!user) return;
 
+    const trimmedName = renameValue.trim();
+    const newName = trimmedName || "Untitled workflow";
+
+    const previousWorkflows = workflows;
+
+    setWorkflows((prev) =>
+      prev.map((w) => (w.id === id ? { ...w, name: newName } : w))
+    );
+
+    setRenameId(null);
+    setRenameValue("");
+
     const { error } = await supabase
       .from("workflows")
-      .update({ name: renameValue || "Untitled workflow" })
+      .update({ name: newName })
       .eq("id", id)
       .eq("user_id", user.id);
 
     if (error) {
-      console.error(error);
-      alert(error.message);
+      setWorkflows(previousWorkflows);
+      toast.error(error.message || "Failed to rename workflow");
       return;
     }
 
-    setRenameId(null);
-    setRenameValue("");
-    loadAll();
+    toast.success("Workflow renamed");
   }
 
   async function saveAsTemplate(w) {
@@ -233,8 +254,7 @@ export default function Page() {
       .order("step_order", { ascending: true });
 
     if (stepsError) {
-      console.error(stepsError);
-      alert(stepsError.message);
+      toast.error(stepsError.message || "Failed to load workflow steps");
       return;
     }
 
@@ -254,94 +274,61 @@ export default function Page() {
     ]);
 
     if (error) {
-      console.error(error);
-      alert(error.message);
+      toast.error(error.message || "Failed to save template");
       return;
     }
 
-    alert("Saved as template");
+    toast.success("Saved as template");
   }
 
   async function runWorkflow(w) {
-    if (!user) return;
+    if (!user || runningId) return;
 
     setRunningId(w.id);
 
-    const { data: stepsData, error: stepsError } = await supabase
-      .from("workflow_steps")
-      .select("*")
-      .eq("workflow_id", w.id)
-      .eq("user_id", user.id)
-      .order("step_order", { ascending: true });
+    try {
+      const { data: stepsData, error: stepsError } = await supabase
+        .from("workflow_steps")
+        .select("*")
+        .eq("workflow_id", w.id)
+        .eq("user_id", user.id)
+        .order("step_order", { ascending: true });
 
-    if (stepsError) {
-      setRunningId(null);
-      console.error(stepsError);
-      alert(stepsError.message);
-      return;
-    }
+      if (stepsError) throw stepsError;
 
-    const clientName = getClientName(w.client_id);
-
-    const mainLog = {
-      workflow_name: w.name,
-      client_name: clientName,
-      trigger: w.trigger || "Manual",
-      time_text: new Date().toISOString(),
-      steps: [],
-      user_id: user.id,
-    };
-
-    (stepsData || []).forEach((s) => {
-      let result = "";
-
-      if (s.type === "Task") {
-        result = `Task created: ${s.config?.taskName || "Untitled task"}`;
+      if (!stepsData || stepsData.length === 0) {
+        throw new Error("This workflow has no steps");
       }
 
-      if (s.type === "Email") {
-        result = `Email sent: ${s.config?.subject || "No subject"}`;
-      }
+      const clientName = getClientName(w.client_id);
 
-      if (s.type === "Notify") {
-        result = `Notification sent: ${s.config?.message || "No message"}`;
-      }
-
-      if (s.type === "Trigger") {
-        result = "Triggered by workflow trigger";
-      }
-
-      mainLog.steps.push({
-        type: s.type,
-        result,
+      const { results, newRunCount } = await executeWorkflow({
+        workflow: w,
+        steps: stepsData,
+        user,
+        clientName,
+        trigger: w.trigger || "Manual",
       });
-    });
 
-    const { error: logError } = await supabase.from("logs").insert([mainLog]);
+      setWorkflows((prev) =>
+        prev.map((item) =>
+          item.id === w.id ? { ...item, run_count: newRunCount } : item
+        )
+      );
 
-    if (logError) {
+      const hasErrors = results.some((step) => step.status === "error");
+
+      if (hasErrors) {
+        toast.error("Workflow finished with errors");
+      } else {
+        toast.success("Workflow executed");
+      }
+    } catch (error) {
+      console.error("run workflow error:", error);
+      toast.error(error.message || "Failed to run workflow");
+    } finally {
       setRunningId(null);
-      console.error(logError);
-      alert(logError.message);
-      return;
     }
-
-    const { error: updateError } = await supabase
-      .from("workflows")
-      .update({ run_count: (w.run_count || 0) + 1 })
-      .eq("id", w.id)
-      .eq("user_id", user.id);
-
-    setRunningId(null);
-
-    if (updateError) {
-      console.error(updateError);
-      alert(updateError.message);
-      return;
-    }
-
-    loadAll();
-    alert("Workflow executed");
   }
 
   const filtered = useMemo(() => {
@@ -504,8 +491,14 @@ export default function Page() {
 
                   <div className="mt-3 flex flex-wrap gap-2">
                     <MetaChip label={getClientName(w.client_id)} />
-                    <MetaChip label={`Trigger: ${w.trigger || "Manual"}`} tone="blue" />
-                    <MetaChip label={`${w.run_count || 0} runs`} tone="purple" />
+                    <MetaChip
+                      label={`Trigger: ${w.trigger || "Manual"}`}
+                      tone="blue"
+                    />
+                    <MetaChip
+                      label={`${w.run_count || 0} runs`}
+                      tone="purple"
+                    />
                   </div>
                 </div>
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { toast } from "sonner";
 import { useEffect, useState } from "react";
 import {
   Settings,
@@ -23,11 +24,21 @@ export default function Page() {
     }
   }, [authLoading, user]);
 
-  function copyUserId() {
-    if (!user?.id) return;
-    navigator.clipboard.writeText(user.id);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  async function copyUserId() {
+    if (!user?.id) {
+      toast.error("No user ID found");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(user.id);
+      toast.success("User ID copied");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (error) {
+      console.error("copy user id error:", error);
+      toast.error("Failed to copy user ID");
+    }
   }
 
   if (authLoading) {
@@ -55,7 +66,8 @@ export default function Page() {
             </h1>
 
             <p className="mt-3 text-sm md:text-base text-zinc-400 max-w-xl">
-              Review your account identity, security status, and environment setup.
+              Review your account identity, security status, and environment
+              setup.
             </p>
           </div>
 

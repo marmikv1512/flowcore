@@ -1,5 +1,6 @@
 "use client";
 
+import { toast } from "sonner";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -26,6 +27,16 @@ const blockOptions = [
   { value: "Notify", label: "Notify", icon: Bell },
 ];
 
+const weekDays = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+];
+
 export default function Page() {
   const { user, authLoading } = useAuth();
 
@@ -38,6 +49,9 @@ export default function Page() {
   const [clientId, setClientId] = useState("");
   const [clients, setClients] = useState([]);
   const [trigger, setTrigger] = useState("Manual");
+  const [scheduleType, setScheduleType] = useState("daily");
+  const [scheduleTime, setScheduleTime] = useState("09:00");
+  const [scheduleDays, setScheduleDays] = useState([]);
   const [blockType, setBlockType] = useState("Task");
   const [isActive, setIsActive] = useState(true);
   const [taskName, setTaskName] = useState("");
@@ -58,6 +72,14 @@ export default function Page() {
     }
   }, [workflowId, authLoading, user]);
 
+  useEffect(() => {
+    if (trigger !== "Time Schedule") return;
+
+    if (scheduleType === "daily" && scheduleDays.length > 0) {
+      setScheduleDays([]);
+    }
+  }, [trigger, scheduleType, scheduleDays.length]);
+
   async function loadBuilderData() {
     if (!user) return;
 
@@ -71,6 +93,7 @@ export default function Page() {
 
     if (clientsError) {
       console.error("load clients error:", clientsError);
+      toast.error(clientsError.message || "Failed to load clients");
       setPageLoading(false);
       return;
     }
@@ -91,6 +114,7 @@ export default function Page() {
 
     if (workflowError) {
       console.error("load workflow error:", workflowError);
+      toast.error(workflowError.message || "Failed to load workflow");
       setPageLoading(false);
       return;
     }
@@ -104,6 +128,7 @@ export default function Page() {
 
     if (stepsError) {
       console.error("load steps error:", stepsError);
+      toast.error(stepsError.message || "Failed to load workflow steps");
       setPageLoading(false);
       return;
     }
@@ -112,6 +137,9 @@ export default function Page() {
     setClientId(workflowData.client_id ? String(workflowData.client_id) : "");
     setTrigger(workflowData.trigger || "Manual");
     setIsActive(workflowData.is_active ?? true);
+    setScheduleType(workflowData.schedule_type || "daily");
+    setScheduleTime(workflowData.schedule_time || "09:00");
+    setScheduleDays(Array.isArray(workflowData.schedule_days) ? workflowData.schedule_days : []);
 
     const mappedSteps = (stepsData || []).map((s) => ({
       id: s.id,
@@ -124,12 +152,38 @@ export default function Page() {
   }
 
   function addStep() {
+    if (blockType === "Task" && !taskName.trim()) {
+      toast.error("Enter task name");
+      return;
+    }
+
+    if (blockType === "Email" && !emailSubject.trim()) {
+      toast.error("Enter email subject");
+      return;
+    }
+
+    if (blockType === "Notify" && !notifyMessage.trim()) {
+      toast.error("Enter notification message");
+      return;
+    }
+
     let config = {};
 
-    if (blockType === "Task") config = { taskName: taskName || "Untitled task" };
-    if (blockType === "Email") config = { subject: emailSubject || "No subject" };
-    if (blockType === "Notify") config = { message: notifyMessage || "No message" };
-    if (blockType === "Trigger") config = { label: "Workflow trigger" };
+    if (blockType === "Task") {
+      config = { taskName: taskName.trim() || "Untitled task" };
+    }
+
+    if (blockType === "Email") {
+      config = { subject: emailSubject.trim() || "No subject" };
+    }
+
+    if (blockType === "Notify") {
+      config = { message: notifyMessage.trim() || "No message" };
+    }
+
+    if (blockType === "Trigger") {
+      config = { label: "Workflow trigger" };
+    }
 
     const newStep = {
       id: Date.now(),
@@ -137,20 +191,22 @@ export default function Page() {
       config,
     };
 
-    setSteps([...steps, newStep]);
+    setSteps((prev) => [...prev, newStep]);
     setTaskName("");
     setEmailSubject("");
     setNotifyMessage("");
+    toast.success(`${blockType} block added`);
   }
 
   function deleteStep(id) {
-    setSteps(steps.filter((s) => s.id !== id));
+    setSteps((prev) => prev.filter((s) => s.id !== id));
     if (editingStepId === id) setEditingStepId(null);
+    toast.success("Step removed");
   }
 
   function updateStepConfig(stepId, key, value) {
-    setSteps(
-      steps.map((s) =>
+    setSteps((prev) =>
+      prev.map((s) =>
         s.id === stepId
           ? { ...s, config: { ...s.config, [key]: value } }
           : s
@@ -160,6 +216,7 @@ export default function Page() {
 
   function moveStepUp(index) {
     if (index === 0) return;
+
     const updated = [...steps];
     [updated[index - 1], updated[index]] = [updated[index], updated[index - 1]];
     setSteps(updated);
@@ -167,76 +224,102 @@ export default function Page() {
 
   function moveStepDown(index) {
     if (index === steps.length - 1) return;
+
     const updated = [...steps];
     [updated[index + 1], updated[index]] = [updated[index], updated[index + 1]];
     setSteps(updated);
   }
 
+  function toggleScheduleDay(day) {
+    setScheduleDays((prev) => {
+      if (prev.includes(day)) {
+        return prev.filter((d) => d !== day);
+      }
+      return [...prev, day];
+    });
+  }
+
   async function saveWorkflow() {
     if (!user) return;
 
-    setSaving(true);
+    const trimmedName = name.trim();
 
-    let finalWorkflowId = workflowId;
-
-    if (workflowId) {
-      const { error: updateError } = await supabase
-        .from("workflows")
-        .update({
-          name: name || "Untitled workflow",
-          client_id: clientId || null,
-          trigger,
-          is_active: isActive,
-        })
-        .eq("id", workflowId)
-        .eq("user_id", user.id);
-
-      if (updateError) {
-        setSaving(false);
-        console.error(updateError);
-        alert(updateError.message);
-        return;
-      }
-
-      const { error: deleteStepsError } = await supabase
-        .from("workflow_steps")
-        .delete()
-        .eq("workflow_id", workflowId)
-        .eq("user_id", user.id);
-
-      if (deleteStepsError) {
-        setSaving(false);
-        console.error(deleteStepsError);
-        alert(deleteStepsError.message);
-        return;
-      }
-    } else {
-      const { data: newWorkflow, error: insertError } = await supabase
-        .from("workflows")
-        .insert([
-          {
-            name: name || "Untitled workflow",
-            client_id: clientId || null,
-            trigger,
-            is_active: isActive,
-            run_count: 0,
-            user_id: user.id,
-          },
-        ])
-        .select()
-        .single();
-
-      if (insertError) {
-        setSaving(false);
-        console.error(insertError);
-        alert(insertError.message);
-        return;
-      }
-
-      finalWorkflowId = newWorkflow.id;
+    if (!trimmedName) {
+      toast.error("Workflow name is required");
+      return;
     }
 
-    if (steps.length > 0) {
+    if (steps.length === 0) {
+      toast.error("Add at least one step");
+      return;
+    }
+
+    if (trigger === "Time Schedule") {
+      if (!scheduleTime) {
+        toast.error("Select a schedule time");
+        return;
+      }
+
+      if (scheduleType === "weekly" && scheduleDays.length === 0) {
+        toast.error("Select at least one day for weekly schedule");
+        return;
+      }
+    }
+
+    setSaving(true);
+
+    try {
+      let finalWorkflowId = workflowId;
+
+      const workflowPayload = {
+        name: trimmedName,
+        client_id: clientId || null,
+        trigger,
+        is_active: isActive,
+        schedule_type: trigger === "Time Schedule" ? scheduleType : null,
+        schedule_time: trigger === "Time Schedule" ? scheduleTime : null,
+        schedule_days:
+          trigger === "Time Schedule"
+            ? scheduleType === "weekly"
+              ? scheduleDays
+              : []
+            : null,
+      };
+
+      if (workflowId) {
+        const { error: updateError } = await supabase
+          .from("workflows")
+          .update(workflowPayload)
+          .eq("id", workflowId)
+          .eq("user_id", user.id);
+
+        if (updateError) throw updateError;
+
+        const { error: deleteStepsError } = await supabase
+          .from("workflow_steps")
+          .delete()
+          .eq("workflow_id", workflowId)
+          .eq("user_id", user.id);
+
+        if (deleteStepsError) throw deleteStepsError;
+      } else {
+        const { data: newWorkflow, error: insertError } = await supabase
+          .from("workflows")
+          .insert([
+            {
+              ...workflowPayload,
+              run_count: 0,
+              user_id: user.id,
+            },
+          ])
+          .select()
+          .single();
+
+        if (insertError) throw insertError;
+
+        finalWorkflowId = newWorkflow.id;
+      }
+
       const stepRows = steps.map((s, index) => ({
         workflow_id: finalWorkflowId,
         type: s.type,
@@ -249,16 +332,16 @@ export default function Page() {
         .from("workflow_steps")
         .insert(stepRows);
 
-      if (stepsInsertError) {
-        setSaving(false);
-        console.error(stepsInsertError);
-        alert(stepsInsertError.message);
-        return;
-      }
-    }
+      if (stepsInsertError) throw stepsInsertError;
 
-    setSaving(false);
-    router.push("/workflows");
+      toast.success("Workflow saved");
+      router.push("/workflows");
+    } catch (error) {
+      console.error("save workflow error:", error);
+      toast.error(error.message || "Failed to save workflow");
+    } finally {
+      setSaving(false);
+    }
   }
 
   const selectedBlockMeta = useMemo(() => {
@@ -329,6 +412,9 @@ export default function Page() {
                 placeholder="Lead onboarding flow"
                 className="w-full rounded-2xl border border-white/5 bg-black/20 px-4 py-3 outline-none placeholder:text-zinc-500"
               />
+              <div className="text-xs text-zinc-500 mt-1">
+                {(name || "").length}/50 characters
+              </div>
             </div>
 
             <div>
@@ -365,6 +451,64 @@ export default function Page() {
                 <option>Time Schedule</option>
               </select>
             </div>
+
+            {trigger === "Time Schedule" && (
+              <div className="rounded-2xl border border-white/5 bg-black/20 p-4 space-y-4">
+                <div>
+                  <label className="text-sm text-zinc-400 mb-2 block">
+                    Schedule type
+                  </label>
+                  <select
+                    value={scheduleType}
+                    onChange={(e) => setScheduleType(e.target.value)}
+                    className="w-full rounded-2xl border border-white/5 bg-black/30 px-4 py-3 outline-none"
+                  >
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-sm text-zinc-400 mb-2 block">
+                    Run time
+                  </label>
+                  <input
+                    type="time"
+                    value={scheduleTime}
+                    onChange={(e) => setScheduleTime(e.target.value)}
+                    className="w-full rounded-2xl border border-white/5 bg-black/30 px-4 py-3 outline-none"
+                  />
+                </div>
+
+                {scheduleType === "weekly" && (
+                  <div>
+                    <label className="text-sm text-zinc-400 mb-2 block">
+                      Run days
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {weekDays.map((day) => {
+                        const selected = scheduleDays.includes(day);
+
+                        return (
+                          <button
+                            key={day}
+                            type="button"
+                            onClick={() => toggleScheduleDay(day)}
+                            className={`rounded-full border px-3 py-2 text-xs capitalize transition ${
+                              selected
+                                ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-300"
+                                : "border-white/10 bg-white/[0.04] text-zinc-400 hover:bg-white/[0.06]"
+                            }`}
+                          >
+                            {day}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="rounded-2xl border border-white/5 bg-black/20 p-4 flex items-center justify-between gap-3">
               <div>
@@ -608,7 +752,7 @@ export default function Page() {
         <div className="rounded-[24px] border border-white/10 bg-[#0f0f13]/90 backdrop-blur-xl p-4 shadow-2xl flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="text-sm font-medium">
-              {name || "Untitled workflow"}
+              {name.trim() || "Untitled workflow"}
             </div>
             <div className="text-xs text-zinc-500 mt-1">
               {steps.length} blocks • {isActive ? "Active" : "Inactive"} • Trigger: {trigger}

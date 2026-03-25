@@ -10,60 +10,124 @@ import {
   Activity,
   Settings,
 } from "lucide-react";
-import { supabase } from "@/lib/supabase";
 import { useRouter, usePathname } from "next/navigation";
+import { supabase } from "@/lib/supabase";
+import { Toaster, toast } from "sonner";
+import { ConfirmProvider } from "@/components/ConfirmModal";
 
 export default function RootLayout({ children }) {
   const router = useRouter();
   const pathname = usePathname();
 
   async function logout() {
-    await supabase.auth.signOut();
-    router.push("/login");
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+
+      toast.success("Logged out");
+      router.push("/login");
+    } catch (error) {
+      toast.error("Failed to logout");
+    }
   }
 
+  // LOGIN PAGE (no sidebar)
   if (pathname === "/login") {
     return (
       <html lang="en">
-        <body className="bg-zinc-950 text-white">{children}</body>
+        <body className="bg-zinc-950 text-white">
+          <ConfirmProvider>
+            {children}
+          </ConfirmProvider>
+
+          <Toaster
+            position="top-right"
+            richColors
+            closeButton
+            duration={2500}
+          />
+        </body>
       </html>
     );
   }
 
+  // MAIN APP
   return (
     <html lang="en">
       <body className="bg-zinc-950 text-white">
-        <div className="flex h-screen">
-          <aside className="w-64 bg-zinc-900 border-r border-zinc-800 p-4 flex flex-col">
-            <div className="text-xl font-semibold mb-6">Flowcore TEST 123</div>
+        <ConfirmProvider>
+          <div className="flex h-screen">
+            {/* SIDEBAR */}
+            <aside className="w-64 bg-zinc-900 border-r border-zinc-800 p-4 flex flex-col">
+              <div className="text-xl font-semibold mb-6">
+                Flowcore
+              </div>
 
-            <nav className="flex flex-col gap-1 text-sm">
-              <SidebarLink href="/" icon={<LayoutDashboard size={18} />} text="Dashboard" />
-              <SidebarLink href="/workflows" icon={<Workflow size={18} />} text="Workflows" />
-              <SidebarLink href="/templates" icon={<FileText size={18} />} text="Templates" />
-              <SidebarLink href="/clients" icon={<Users size={18} />} text="Clients" />
-              <SidebarLink href="/logs" icon={<Activity size={18} />} text="Logs" />
-              <SidebarLink href="/settings" icon={<Settings size={18} />} text="Settings" />
-            </nav>
-          </aside>
+              <nav className="flex flex-col gap-1 text-sm">
+                <SidebarLink
+                  href="/"
+                  icon={<LayoutDashboard size={18} />}
+                  text="Dashboard"
+                />
+                <SidebarLink
+                  href="/workflows"
+                  icon={<Workflow size={18} />}
+                  text="Workflows"
+                />
+                <SidebarLink
+                  href="/templates"
+                  icon={<FileText size={18} />}
+                  text="Templates"
+                />
+                <SidebarLink
+                  href="/clients"
+                  icon={<Users size={18} />}
+                  text="Clients"
+                />
+                <SidebarLink
+                  href="/logs"
+                  icon={<Activity size={18} />}
+                  text="Logs"
+                />
+                <SidebarLink
+                  href="/settings"
+                  icon={<Settings size={18} />}
+                  text="Settings"
+                />
+              </nav>
+            </aside>
 
-          <div className="flex-1 flex flex-col">
-            <div className="h-14 border-b border-zinc-800 bg-zinc-900 flex items-center justify-between px-6">
-              <div className="text-zinc-400">Flowcore Dashboard</div>
+            {/* MAIN CONTENT */}
+            <div className="flex-1 flex flex-col">
+              {/* TOP BAR */}
+              <div className="h-14 border-b border-zinc-800 bg-zinc-900 flex items-center justify-between px-6">
+                <div className="text-zinc-400">
+                  Flowcore Dashboard
+                </div>
 
-              <button
-                onClick={logout}
-                className="bg-zinc-800 px-3 py-1 rounded"
-              >
-                Logout
-              </button>
+                <button
+                  onClick={logout}
+                  className="bg-zinc-800 px-3 py-1 rounded hover:bg-zinc-700 transition"
+                >
+                  Logout
+                </button>
+              </div>
+
+              {/* PAGE CONTENT */}
+              <main className="flex-1 p-8 overflow-auto">
+                {children}
+              </main>
             </div>
-
-            <main className="flex-1 p-8 overflow-auto">
-              {children}
-            </main>
           </div>
-        </div>
+        </ConfirmProvider>
+
+        {/* GLOBAL TOAST */}
+        <Toaster
+          position="top-right"
+          richColors
+          closeButton
+          duration={2500}
+        />
       </body>
     </html>
   );

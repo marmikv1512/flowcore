@@ -1,5 +1,7 @@
 "use client";
 
+import { toast } from "sonner";
+import { useConfirm } from "@/components/ConfirmModal";
 import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
@@ -17,6 +19,8 @@ import useAuth from "@/lib/useAuth";
 
 export default function Page() {
   const { user, authLoading } = useAuth();
+  const confirm = useConfirm();
+
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -44,8 +48,7 @@ export default function Page() {
       .order("id", { ascending: false });
 
     if (error) {
-      console.error("load logs error:", error);
-      alert(error.message);
+      toast.error(error.message || "Failed to load logs");
       setLoading(false);
       return;
     }
@@ -57,8 +60,16 @@ export default function Page() {
   async function deleteLog(id) {
     if (!user) return;
 
-    const yes = window.confirm("Delete this log?");
-    if (!yes) return;
+    const ok = await confirm({
+      title: "Delete log",
+      description: "Are you sure you want to delete this log?",
+    });
+
+    if (!ok) return;
+
+    const previousLogs = logs;
+
+    setLogs((prev) => prev.filter((l) => l.id !== id));
 
     const { error } = await supabase
       .from("logs")
@@ -67,19 +78,27 @@ export default function Page() {
       .eq("user_id", user.id);
 
     if (error) {
-      console.error("delete log error:", error);
-      alert(error.message);
+      setLogs(previousLogs);
+      toast.error(error.message || "Failed to delete log");
       return;
     }
 
-    load();
+    toast.success("Log deleted");
   }
 
   async function clearLogs() {
     if (!user) return;
 
-    const yes = window.confirm("Clear all your logs?");
-    if (!yes) return;
+    const ok = await confirm({
+      title: "Clear all logs",
+      description: "Are you sure you want to clear all your logs?",
+    });
+
+    if (!ok) return;
+
+    const previousLogs = logs;
+
+    setLogs([]);
 
     const { error } = await supabase
       .from("logs")
@@ -87,12 +106,12 @@ export default function Page() {
       .eq("user_id", user.id);
 
     if (error) {
-      console.error("clear logs error:", error);
-      alert(error.message);
+      setLogs(previousLogs);
+      toast.error(error.message || "Failed to clear logs");
       return;
     }
 
-    load();
+    toast.success("All logs cleared");
   }
 
   const filteredLogs = useMemo(() => {

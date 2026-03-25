@@ -1,5 +1,7 @@
 "use client";
 
+import { toast } from "sonner";
+import { useConfirm } from "@/components/ConfirmModal";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -59,6 +61,7 @@ const defaultTemplates = [
 export default function Page() {
   const router = useRouter();
   const { user, authLoading } = useAuth();
+  const confirm = useConfirm();
 
   const [templates, setTemplates] = useState([]);
   const [search, setSearch] = useState("");
@@ -88,8 +91,7 @@ export default function Page() {
       .order("id", { ascending: false });
 
     if (error) {
-      console.error("load templates error:", error);
-      alert(error.message);
+      toast.error(error.message || "Failed to load templates");
       setPageLoading(false);
       return;
     }
@@ -109,60 +111,73 @@ export default function Page() {
 
     setCreatingId(t.id);
 
-    const { data: newWorkflow, error: workflowError } = await supabase
-      .from("workflows")
-      .insert([
+    try {
+      const newWorkflow = await toast.promise(
+        (async () => {
+          const { data: newWorkflow, error: workflowError } = await supabase
+            .from("workflows")
+            .insert([
+              {
+                name: t.name || "Untitled workflow",
+                client_id: null,
+                trigger: t.trigger || "Manual",
+                is_active: true,
+                run_count: 0,
+                user_id: user.id,
+              },
+            ])
+            .select()
+            .single();
+
+          if (workflowError) throw workflowError;
+
+          const steps = Array.isArray(t.steps) ? t.steps : [];
+
+          if (steps.length > 0) {
+            const stepRows = steps.map((step, index) => ({
+              workflow_id: newWorkflow.id,
+              type: step.type,
+              step_order: index,
+              config: step.config || {},
+              user_id: user.id,
+            }));
+
+            const { error: stepsError } = await supabase
+              .from("workflow_steps")
+              .insert(stepRows);
+
+            if (stepsError) throw stepsError;
+          }
+
+          return newWorkflow;
+        })(),
         {
-          name: t.name || "Untitled workflow",
-          client_id: null,
-          trigger: t.trigger || "Manual",
-          is_active: true,
-          run_count: 0,
-          user_id: user.id,
-        },
-      ])
-      .select()
-      .single();
+          loading: "Creating workflow from template...",
+          success: "Workflow created from template",
+          error: (err) =>
+            err.message || "Failed to create workflow from template",
+        }
+      );
 
-    if (workflowError) {
-      console.error("create workflow from template error:", workflowError);
-      alert(workflowError.message);
+      router.push(`/workflows/builder?id=${newWorkflow.id}`);
+    } finally {
       setCreatingId(null);
-      return;
     }
-
-    const steps = Array.isArray(t.steps) ? t.steps : [];
-
-    if (steps.length > 0) {
-      const stepRows = steps.map((step, index) => ({
-        workflow_id: newWorkflow.id,
-        type: step.type,
-        step_order: index,
-        config: step.config || {},
-        user_id: user.id,
-      }));
-
-      const { error: stepsError } = await supabase
-        .from("workflow_steps")
-        .insert(stepRows);
-
-      if (stepsError) {
-        console.error("create workflow steps from template error:", stepsError);
-        alert(stepsError.message);
-        setCreatingId(null);
-        return;
-      }
-    }
-
-    setCreatingId(null);
-    router.push(`/workflows/builder?id=${newWorkflow.id}`);
   }
 
   async function deleteTemplate(id) {
     if (!user) return;
 
-    const yes = window.confirm("Delete this template?");
-    if (!yes) return;
+    const ok = await confirm({
+      title: "Delete template",
+      description: "Are you sure you want to delete this template?",
+    });
+
+    if (!ok) return;
+
+    const previousTemplates = templates;
+
+    setTemplates((prev) => prev.filter((t) => t.id !== id));
 
     const { error } = await supabase
       .from("templates")
@@ -171,12 +186,12 @@ export default function Page() {
       .eq("user_id", user.id);
 
     if (error) {
-      console.error("delete template error:", error);
-      alert(error.message);
+      setTemplates(previousTemplates);
+      toast.error(error.message || "Failed to delete template");
       return;
     }
 
-    loadTemplates();
+    toast.success("Template deleted");
   }
 
   const filteredTemplates = useMemo(() => {
@@ -214,7 +229,8 @@ export default function Page() {
             </h1>
 
             <p className="mt-3 text-sm md:text-base text-zinc-400 max-w-xl">
-              Use a ready-made flow as the starting point, then finish it in the builder.
+              Use a ready-made flow as the starting point, then finish it in the
+              builder.
             </p>
           </div>
 
@@ -274,7 +290,10 @@ export default function Page() {
                   </div>
 
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <Badge label={`Trigger: ${t.trigger || "Manual"}`} tone="blue" />
+                    <Badge
+                      label={`Trigger: ${t.trigger || "Manual"}`}
+                      tone="blue"
+                    />
                     <Badge
                       label={t.is_default ? "Default" : "Custom"}
                       tone={t.is_default ? "neutral" : "purple"}
